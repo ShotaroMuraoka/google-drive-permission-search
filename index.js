@@ -1,6 +1,8 @@
 const fs = require('fs');
 const readline = require('readline');
-const {google} = require('googleapis');
+const { google } = require('googleapis');
+const { drive } = require('googleapis/build/src/apis/drive');
+const { file } = require('googleapis/build/src/apis/file');
 
 // If modifying these scopes, delete token.json.
 const SCOPES = ['https://www.googleapis.com/auth/drive.metadata.readonly'];
@@ -23,9 +25,9 @@ fs.readFile('credentials.json', (err, content) => {
  * @param {function} callback The callback to call with the authorized client.
  */
 function authorize(credentials, callback) {
-  const {client_secret, client_id, redirect_uris} = credentials.installed;
+  const { client_secret, client_id, redirect_uris } = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(
-      client_id, client_secret, redirect_uris[0]);
+    client_id, client_secret, redirect_uris[0]);
 
   // Check if we have previously stored a token.
   fs.readFile(TOKEN_PATH, (err, token) => {
@@ -70,35 +72,137 @@ function getAccessToken(oAuth2Client, callback) {
  * Lists the names and IDs of up to 10 files.
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
-function listFiles(auth) {
-  const drive = google.drive({version: 'v3', auth});
-  drive.files.list({
-    pageSize: 10,
-    fields: 'nextPageToken, files(id, name)',
-  }, (err, res) => {
-    if (err) return console.log('The API returned an error: ' + err);
-    const files = res.data.files;
-    if (files.length) {
-      console.log('Files:');
-      files.map((file) => {
-        drive.permissions.list({
-          fileId: file.id,
-        }, (err, res) => {
-          if (err) return console.log('The API returned an error: ' + err);
-          let permissions = res.data.permissions;
-          permissions.map((permission) => {
-            if (permission.type === 'anyone') {
-              console.log('Warning! Weve`ve detected dangerous files.');
-              console.log(`${file.name} (${file.id})`);
-              console.log('Permissions: ' + permission.type);
-            }            
-          });
-        });
+async function listFiles(auth) {
 
-        // console.log(`${file.name} (${file.id})`);
+  let permissionSerchResult = {
+    unknown: [],
+    anyone: [],
+  };
+
+  const drive = google.drive({ version: 'v3', auth });
+  let fileList = [];
+  var reqParam = { fields: 'nextPageToken, files(id, name)', }
+  fileList = await fetchFileList(drive, reqParam, fileList);
+  var permissionAlert = await fetchFilePermissionList(drive, events);
+  // if (events.length) {
+  //   events.map((file) => {
+  //     console.log(file.name);
+  //   });
+  // }
+  // let initialRequest = function(request, result) {
+  //   request.execute(function(resp) {
+  //     let nextPageToken = resp.nextPageToken;
+  //     if(nextPageToken) {
+  //       let nextParams = reqParams;
+  //       nextParams.pageToken = nextPageToken;
+  //       request = 
+  //     }
+  //   });
+  // }  
+
+  // ファイルリストを取得する.
+  // var fetchDriveList = new Promise(function (resolve, reject) {
+  //   drive.files.list({
+  //     // TODO: To be resolve the per-user limitation.
+  //     pageSize: 10,
+  //     fields: 'nextPageToken, files(id, name)',
+  //   }, (err, res) => {
+  //     if (err) return console.log('File API returned an error: ' + err);
+  //     const files = res.data.files;
+  //     if (files.length) {
+  //       console.log('Files:');
+  //       files.map((file) => {
+  //         // ファイルのパーミッションを取得する.
+  //         const promise = (message, msec) => new Promise((resolve, reject) => {
+  //           drive.permissions.list({
+  //             fileId: file.id,
+  //           }, (err, res) => {
+  //             // if (err) return console.log('Permissions API returned an error: ' + err);
+  //             if (err) {
+  //               // console.log('Permissions API returned an error: ' + err);
+  //               permissionSerchResult.unknown.push(file.name + file.id);
+  //             } else {
+  //               let permissions = res.data.permissions;
+  //               permissions.map((permission) => {
+  //                 if (permission.type === 'anyone') {
+  //                   permissionSerchResult.anyone.push(file.name + file.id);
+  //                   // console.log('Warning! Weve`ve detected dangerous files.');
+  //                   // console.log(`${file.name} (${file.id})`);
+  //                   // console.log('Permissions: ' + permission.type);
+  //                 }
+  //               });
+  //             }
+  //             resolve();
+  //           }, msec);
+  //         });
+
+  //         // console.log(`${file.name} (${file.id})`);
+  //       });
+  //     } else {
+  //       console.log('No files found.');
+  //     }
+
+  //     if (permissionSerchResult.unknown.length) {
+  //       console.log('Warning!! The file permissions are unknown.');
+  //       permissionSerchResult.unknown.map((files) => {
+  //         console.log(files);
+  //       });
+  //     }
+  //     if (permissionSerchResult.anyone.length) {
+  //       console.log('Warning!! The file permissions are anyone.');
+  //       permissionSerchResult.anyone.map((files) => {
+  //         console.log(files);
+  //       });
+  //     }
+  //     console.log('NextPageToken: ' + res.data.nextPageToken);
+  //   });
+  // }
+}
+
+async function fetchFileList(drive, reqParam, fileList) {
+  return new Promise((resolve, reject) => {
+    drive.files.list(reqParam, (err, res) => {
+      if (err) {
+        console.log('File ApI returned an error: ' + err);
+        reject('File ApI returned an error: ' + err);
+        return;
+      }
+      // fileList = fileList.concat(res.data.files);
+      fileList = res.data.files;
+      if (!fileList.length) {
+        console.log('No files found.');
+        reject('No files found.');
+        return;
+      }
+      var nextPageToken = res.data.nextPageToken;
+      if (res.data.nextPageToken) {
+        console.log(nextPageToken);
+        reqParam.nextPageToken = nextPageToken;
+        fetchFileList(drive, reqParam, fileList);
+      } else {
+        resolve(fileList);
+      }
+      resolve(fileList);
+    });
+    return fileList;
+  });
+}
+
+async function fetchFilePermissionList(drive, file) {
+  return new Promise((resolve, reject) => {
+    let permissionSearchResult = [];
+    drive.permissions.list({ fileId: file.id },
+      (err, res) => {
+        if (err) {
+          permissionSearchResult.unknown.push(file.name + file.id);
+        } else {
+          res.data.permissions.map((permission) => {
+            if (permission.type === 'anyone') {
+              permissionSearchResult.anyone.push(file.name + file.id);
+            }
+          })
+        }
       });
-    } else {
-      console.log('No files found.');
-    }
+    resolve(permissionSearchResult);
   });
 }
